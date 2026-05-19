@@ -21,7 +21,18 @@
 set -euo pipefail
 
 # ---------- locate self & defaults ----------------------------------------
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# Resolve symlinks so AGENTIFY_HOME points at the real install dir
+# (e.g. when this script is symlinked into ~/.local/bin).
+_resolve_self() {
+  local src="${BASH_SOURCE[0]}" dir
+  while [[ -L "$src" ]]; do
+    dir="$(cd -P -- "$(dirname -- "$src")" && pwd)"
+    src="$(readlink -- "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  cd -P -- "$(dirname -- "$src")" && pwd
+}
+SCRIPT_DIR="$(_resolve_self)"
 AGENTIFY_HOME="${AGENTIFY_HOME:-$SCRIPT_DIR}"
 TEMPLATES_DIR="$AGENTIFY_HOME/templates"
 AGENTS_SOURCE_DIR="$AGENTIFY_HOME/agents"
