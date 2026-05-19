@@ -1,0 +1,8 @@
+---
+name: {{SKILL_NAME}}
+description: {{SKILL_DESCRIPTION}}
+---
+
+# {{SKILL_NAME}}
+
+{{SKILL_BODY}}

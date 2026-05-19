@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Editor / OS
+.DS_Store
+*.swp
+
+# Local Claude Code settings (user-specific)
+.claude/settings.local.json
+
+# Generated platform outputs at repo root.
+# This repo is the template, so we don't track its own rendered output.
+# Sample renders live under examples/ for reference.
+/.claude/agents/
+/.github/agents/
+/.goose/recipes/
+/.kiro/steering/
