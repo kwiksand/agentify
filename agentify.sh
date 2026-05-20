@@ -9,7 +9,10 @@
 #
 # Usage:
 #   agentify.sh [--dir PATH] [--name NAME] [--no-sync] [--yes]
-#               [--sync PATH_TO_SYNC_PY]
+#               [--sync PATH_TO_SYNC_PY] [--targets LIST]
+#
+# --targets is a comma-separated subset of the sync.py adapter names
+# (e.g. "claude-code,copilot"). If omitted, you'll be prompted.
 #
 # Env:
 #   AGENTIFY_HOME      Directory containing this script + templates/.
@@ -45,6 +48,8 @@ TARGET_DIR="$(pwd)"
 PROJECT_NAME=""
 RUN_SYNC=1
 ASSUME_YES=0
+SYNC_TARGETS=""
+DEFAULT_SYNC_TARGETS="claude-code,copilot"
 
 # ---------- arg parsing ----------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -52,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --dir)      TARGET_DIR="$(cd -- "$2" && pwd)"; shift 2 ;;
     --name)     PROJECT_NAME="$2"; shift 2 ;;
     --sync)     SYNC_PY="$2"; shift 2 ;;
+    --targets)  SYNC_TARGETS="$2"; shift 2 ;;
     --no-sync)  RUN_SYNC=0; shift ;;
     --yes|-y)   ASSUME_YES=1; shift ;;
     -h|--help)
@@ -141,6 +147,12 @@ PROJECT_FRAMEWORKS="$(ask 'Frameworks / runtime' "$DETECTED_FW")"
 PROJECT_BUILD="$(ask 'Build / test command' "$DETECTED_BUILD")"
 PROJECT_GETTING_STARTED="$(ask 'Getting-started one-liner' 'TODO: install deps, run tests, etc.')"
 
+# Which agent platforms to sync to. Known adapters in sync.py:
+#   claude-code, copilot, gemini, kiro, goose
+if [[ -z "$SYNC_TARGETS" ]]; then
+  SYNC_TARGETS="$(ask 'Sync targets (comma-separated: claude-code,copilot,gemini,kiro,goose)' "$DEFAULT_SYNC_TARGETS")"
+fi
+
 # ---------- render helper --------------------------------------------------
 render() {
   # render TEMPLATE_PATH OUTPUT_PATH KEY=VAL ...
@@ -165,6 +177,23 @@ render "$TEMPLATES_DIR/AGENTS.md.tpl" "AGENTS.md" \
   "PROJECT_LANGUAGE=$PROJECT_LANGUAGE" \
   "PROJECT_FRAMEWORKS=$PROJECT_FRAMEWORKS" \
   "PROJECT_BUILD=$PROJECT_BUILD"
+
+has_target() {
+  # has_target NAME -> 0 if NAME is in the comma-separated SYNC_TARGETS
+  local needle="$1"
+  case ",$SYNC_TARGETS," in
+    *",$needle,"*) return 0 ;;
+    *)             return 1 ;;
+  esac
+}
+
+if has_target "claude-code"; then
+  render "$TEMPLATES_DIR/CLAUDE.md.tpl" "CLAUDE.md"
+fi
+
+if has_target "gemini"; then
+  render "$TEMPLATES_DIR/GEMINI.md.tpl" "GEMINI.md"
+fi
 
 render "$TEMPLATES_DIR/README.md.tpl" "README.md" \
   "PROJECT_NAME=$PROJECT_NAME" \
@@ -234,12 +263,12 @@ fi
 # ---------- run sync.py ----------------------------------------------------
 if (( RUN_SYNC )); then
   if [[ -f "$SYNC_PY" ]]; then
-    say "running sync: $SYNC_PY"
-    python3 "$SYNC_PY" --out "$TARGET_DIR"
+    say "running sync: $SYNC_PY (targets: $SYNC_TARGETS)"
+    python3 "$SYNC_PY" --out "$TARGET_DIR" --target "$SYNC_TARGETS"
   else
     warn "sync.py not found at $SYNC_PY"
     warn "set AGENTIFY_SYNC_PY or pass --sync PATH, then run:"
-    warn "  python3 \$AGENTIFY_SYNC_PY --out \"$TARGET_DIR\""
+    warn "  python3 \$AGENTIFY_SYNC_PY --out \"$TARGET_DIR\" --target \"$SYNC_TARGETS\""
   fi
 else
   say "skipping sync (--no-sync)"
