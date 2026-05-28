@@ -1,5 +1,7 @@
 # agentify
 
+![agentify logo](assets/agentify.png)
+
 A small toolkit for bootstrapping a project with portable, multi-platform
 AI coding-assistant configuration. One canonical set of sub-agent
 definitions, transpiled into the native formats used by the major
@@ -31,6 +33,8 @@ each platform's native layout.
 | **GitHub Copilot** (custom agents) | `.github/agents/<name>.agent.md` | Copilot custom-agent markdown |
 | **Kiro** (AWS) | `.kiro/steering/<name>.md` | Steering doc with `inclusion: manual` |
 | **Goose** (Block) | `.goose/recipes/<name>.yaml` | Goose recipe YAML |
+| **Gemini CLI** (custom commands) | `.gemini/commands/<name>.toml` | Custom TOML slash command |
+| **Google Antigravity** (custom agents) | `.agents/agents/<name>.md` | Antigravity custom-agent markdown + YAML frontmatter |
 
 Tools that read `AGENTS.md` directly (Cursor, Aider, OpenAI Codex CLI,
 and others that follow the [agents.md](https://agents.md) convention)
@@ -46,7 +50,9 @@ agentify.sh                   # scaffolder: detect stack, render templates, run 
 templates/
   AGENTS.md.tpl               # rendered into the target project as AGENTS.md
   README.md.tpl               # rendered into the target project as README.md
-  SKILL.md.tpl                # rendered into .claude/skills/<name>/SKILL.md
+  SKILL.md.tpl                # rendered into .claude/skills/ and .agents/skills/
+  ANTIGRAVITY.md.tpl          # rendered into the target project as ANTIGRAVITY.md
+  GEMINI.md.tpl               # rendered into the target project as GEMINI.md
 
 agents/                       # canonical sub-agent source of truth
   code-writer.md
@@ -58,14 +64,19 @@ agents/                       # canonical sub-agent source of truth
 sync/
   sync.py                     # entry point: reads agents/, writes target dirs
   adapters/
+    antigravity.py
     claude_code.py
     copilot.py
+    gemini.py
     goose.py
     kiro.py
 
 examples/                     # rendered output, committed for reference
+  .agents/agents/
+  .agents/skills/
   .claude/agents/
   .github/agents/
+  .gemini/commands/
   .goose/recipes/
   .kiro/steering/
 
@@ -152,6 +163,13 @@ The markdown body is the system prompt.
   `haiku` automatically; anything else is passed through verbatim.
   Bash/shell tools have no stable first-party identifier, so they're
   dropped — wire shell up via an MCP server if you need it.
+- **Gemini CLI** does not support first-class sub-agents, so the adapter
+  emits custom slash commands in `.gemini/commands/<name>.toml`. When
+  invoked, the custom command's prompt functions as the agent instructions.
+- **Google Antigravity** utilizes a project-level `.agents/` directory.
+  Canonical agents are synced to `.agents/agents/<name>.md` with YAML
+  frontmatter, and custom workspace-level skills are synced to
+  `.agents/skills/<name>/SKILL.md`.
 
 ## Tools via MCP
 
@@ -178,18 +196,8 @@ A grab-bag of features and improvements worth picking up:
 
 - **Cursor** — `.cursor/rules/*.mdc` (project rules) and any
   forthcoming sub-agent format.
-- **Aider** — `.aider.conf.yml` plus per-agent `--message-file`
-  presets.
 - **OpenAI Codex CLI** / **Codex Web** — once a stable per-agent
   config format lands.
-- **Continue.dev** — `.continue/` config, custom commands, and
-  context providers.
-- **Windsurf / Cascade** — workspace rules + per-agent prompts.
-- **Zed AI assistant** — `.zed/` settings and slash commands.
-- **JetBrains AI Assistant** — project-level prompt library.
-- **Sourcegraph Cody** — `.sourcegraph/` custom commands.
-- **Tabnine / Codeium / Supermaven** — where each exposes
-  per-project system prompts.
 
 ### Better scaffolding
 
