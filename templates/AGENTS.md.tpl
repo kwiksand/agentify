@@ -15,7 +15,7 @@ that follow the AGENTS.md convention.
 
 - Prefer editing existing files over creating new ones.
 - Don't add speculative abstractions or backwards-compat shims.
-- For exploratory questions, recommend before implementing.
+- For exploratory questions, recommend before implementing.{{STEER_HONEST_CONVENTIONS}}{{QUALITY_CONVENTIONS}}
 
 ## Available sub-agents
 

@@ -10,9 +10,10 @@
 # Usage:
 #   agentify.sh [--dir PATH] [--name NAME] [--no-sync] [--yes]
 #               [--sync PATH_TO_SYNC_PY] [--targets LIST]
+#               [--steer-honest] [--require-lint] [--require-test]
 #
 # --targets is a comma-separated subset of the sync.py adapter names
-# (e.g. "claude-code,copilot"). If omitted, you'll be prompted.
+# (e.g. "claude-code,copilot,antigravity"). If omitted, you'll be prompted.
 #
 # Env:
 #   AGENTIFY_HOME      Directory containing this script + templates/.
@@ -50,18 +51,24 @@ RUN_SYNC=1
 ASSUME_YES=0
 SYNC_TARGETS=""
 DEFAULT_SYNC_TARGETS="claude-code,copilot"
+STEER_HONEST=""
+REQUIRE_LINT=""
+REQUIRE_TEST=""
 
 # ---------- arg parsing ----------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dir)      TARGET_DIR="$(cd -- "$2" && pwd)"; shift 2 ;;
-    --name)     PROJECT_NAME="$2"; shift 2 ;;
-    --sync)     SYNC_PY="$2"; shift 2 ;;
-    --targets)  SYNC_TARGETS="$2"; shift 2 ;;
-    --no-sync)  RUN_SYNC=0; shift ;;
-    --yes|-y)   ASSUME_YES=1; shift ;;
+    --dir)            TARGET_DIR="$(cd -- "$2" && pwd)"; shift 2 ;;
+    --name)           PROJECT_NAME="$2"; shift 2 ;;
+    --sync)           SYNC_PY="$2"; shift 2 ;;
+    --targets)        SYNC_TARGETS="$2"; shift 2 ;;
+    --no-sync)        RUN_SYNC=0; shift ;;
+    --yes|-y)         ASSUME_YES=1; shift ;;
+    --steer-honest)   STEER_HONEST="yes"; shift ;;
+    --require-lint)   REQUIRE_LINT="yes"; shift ;;
+    --require-test)   REQUIRE_TEST="yes"; shift ;;
     -h|--help)
-      sed -n '2,20p' "$0"; exit 0 ;;
+      sed -n '2,24p' "$0"; exit 0 ;;
     *)
       echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -130,6 +137,24 @@ detect_build() {
   echo "unknown"
 }
 
+detect_linter() {
+  [[ -f package.json ]] && {
+    grep -q '"lint"' package.json 2>/dev/null && { echo "npm run lint"; return; }
+  }
+  [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]] && {
+    if grep -q "ruff" pyproject.toml 2>/dev/null; then
+      echo "ruff check"
+      return
+    fi
+    which ruff >/dev/null 2>&1 && { echo "ruff check"; return; }
+    which flake8 >/dev/null 2>&1 && { echo "flake8"; return; }
+    which pylint >/dev/null 2>&1 && { echo "pylint"; return; }
+  }
+  [[ -f go.mod ]]                        && { echo "golangci-lint run"; return; }
+  [[ -f Cargo.toml ]]                    && { echo "cargo clippy"; return; }
+  echo "none"
+}
+
 # ---------- gather ---------------------------------------------------------
 say "Target directory: $TARGET_DIR"
 [[ -d "$TEMPLATES_DIR" ]] || die "templates not found at $TEMPLATES_DIR (set AGENTIFY_HOME)"
@@ -137,20 +162,26 @@ say "Target directory: $TARGET_DIR"
 DETECTED_LANG="$(detect_language)"
 DETECTED_FW="$(detect_frameworks)"
 DETECTED_BUILD="$(detect_build)"
+DETECTED_LINT="$(detect_linter)"
 
-say "Detected: lang=$DETECTED_LANG, frameworks=$DETECTED_FW, build=$DETECTED_BUILD"
+say "Detected: lang=$DETECTED_LANG, frameworks=$DETECTED_FW, build=$DETECTED_BUILD, linter=$DETECTED_LINT"
 
 PROJECT_NAME="$(ask 'Project name' "$PROJECT_NAME")"
 PROJECT_DESCRIPTION="$(ask 'One-line description' "TODO: describe $PROJECT_NAME")"
 PROJECT_LANGUAGE="$(ask 'Primary language' "$DETECTED_LANG")"
 PROJECT_FRAMEWORKS="$(ask 'Frameworks / runtime' "$DETECTED_FW")"
 PROJECT_BUILD="$(ask 'Build / test command' "$DETECTED_BUILD")"
+PROJECT_LINT="$(ask 'Linter command' "$DETECTED_LINT")"
 PROJECT_GETTING_STARTED="$(ask 'Getting-started one-liner' 'TODO: install deps, run tests, etc.')"
 
+: "${STEER_HONEST:=$(ask 'Steer LLM to write honest, concise responses (yes/no)' 'yes')}"
+: "${REQUIRE_LINT:=$(ask 'Require linting before completing coding tasks (yes/no)' 'yes')}"
+: "${REQUIRE_TEST:=$(ask 'Require running tests after modifying code (yes/no)' 'yes')}"
+
 # Which agent platforms to sync to. Known adapters in sync.py:
-#   claude-code, copilot, gemini, kiro, goose
+#   claude-code, copilot, gemini, kiro, goose, antigravity
 if [[ -z "$SYNC_TARGETS" ]]; then
-  SYNC_TARGETS="$(ask 'Sync targets (comma-separated: claude-code,copilot,gemini,kiro,goose)' "$DEFAULT_SYNC_TARGETS")"
+  SYNC_TARGETS="$(ask 'Sync targets (comma-separated: claude-code,copilot,gemini,kiro,goose,antigravity)' "$DEFAULT_SYNC_TARGETS")"
 fi
 
 # ---------- render helper --------------------------------------------------
@@ -171,12 +202,27 @@ render() {
 }
 
 # ---------- scaffold -------------------------------------------------------
+STEER_HONEST_CONVENTIONS=""
+if [[ "$STEER_HONEST" == "yes" || "$STEER_HONEST" == "true" || "$STEER_HONEST" == "1" ]]; then
+  STEER_HONEST_CONVENTIONS=$'\n- Provide honest, concise responses. Avoid overly optimistic, overly positive, or unnecessarily verbose explanations.\n- State limitations, risks, and trade-offs clearly. If unsure, ask for clarification.'
+fi
+
+QUALITY_CONVENTIONS=""
+if [[ "$REQUIRE_LINT" == "yes" || "$REQUIRE_LINT" == "true" || "$REQUIRE_LINT" == "1" ]] && [[ "$PROJECT_LINT" != "none" && -n "$PROJECT_LINT" ]]; then
+  QUALITY_CONVENTIONS+=$'\n- Before completing any coding task, run the linter (`'"$PROJECT_LINT"'`) and fix all linting errors.'
+fi
+if [[ "$REQUIRE_TEST" == "yes" || "$REQUIRE_TEST" == "true" || "$REQUIRE_TEST" == "1" ]] && [[ "$PROJECT_BUILD" != "unknown" && -n "$PROJECT_BUILD" ]]; then
+  QUALITY_CONVENTIONS+=$'\n- Run the test suite using (`'"$PROJECT_BUILD"'`) after any code changes to verify that all tests pass.'
+fi
+
 render "$TEMPLATES_DIR/AGENTS.md.tpl" "AGENTS.md" \
   "PROJECT_NAME=$PROJECT_NAME" \
   "PROJECT_DESCRIPTION=$PROJECT_DESCRIPTION" \
   "PROJECT_LANGUAGE=$PROJECT_LANGUAGE" \
   "PROJECT_FRAMEWORKS=$PROJECT_FRAMEWORKS" \
-  "PROJECT_BUILD=$PROJECT_BUILD"
+  "PROJECT_BUILD=$PROJECT_BUILD" \
+  "STEER_HONEST_CONVENTIONS=$STEER_HONEST_CONVENTIONS" \
+  "QUALITY_CONVENTIONS=$QUALITY_CONVENTIONS"
 
 has_target() {
   # has_target NAME -> 0 if NAME is in the comma-separated SYNC_TARGETS
@@ -193,6 +239,10 @@ fi
 
 if has_target "gemini"; then
   render "$TEMPLATES_DIR/GEMINI.md.tpl" "GEMINI.md"
+fi
+
+if has_target "antigravity"; then
+  render "$TEMPLATES_DIR/ANTIGRAVITY.md.tpl" "ANTIGRAVITY.md"
 fi
 
 render "$TEMPLATES_DIR/README.md.tpl" "README.md" \
@@ -223,16 +273,38 @@ fi
 # ---------- skills ---------------------------------------------------------
 seed_skill() {
   local name="$1" desc="$2" body="$3"
+  
+  # Claude Code
   local dir=".claude/skills/$name"
   local out="$dir/SKILL.md"
-  [[ -e "$out" ]] && { warn "exists, skipping: $out"; return; }
-  mkdir -p "$dir"
-  local content; content="$(cat "$TEMPLATES_DIR/SKILL.md.tpl")"
-  content="${content//\{\{SKILL_NAME\}\}/$name}"
-  content="${content//\{\{SKILL_DESCRIPTION\}\}/$desc}"
-  content="${content//\{\{SKILL_BODY\}\}/$body}"
-  printf '%s' "$content" > "$out"
-  say "wrote $out"
+  if [[ ! -e "$out" ]]; then
+    mkdir -p "$dir"
+    local content; content="$(cat "$TEMPLATES_DIR/SKILL.md.tpl")"
+    content="${content//\{\{SKILL_NAME\}\}/$name}"
+    content="${content//\{\{SKILL_DESCRIPTION\}\}/$desc}"
+    content="${content//\{\{SKILL_BODY\}\}/$body}"
+    printf '%s' "$content" > "$out"
+    say "wrote $out"
+  else
+    warn "exists, skipping: $out"
+  fi
+
+  # Antigravity
+  if has_target "antigravity"; then
+    local adir=".agents/skills/$name"
+    local aout="$adir/SKILL.md"
+    if [[ ! -e "$aout" ]]; then
+      mkdir -p "$adir"
+      local content; content="$(cat "$TEMPLATES_DIR/SKILL.md.tpl")"
+      content="${content//\{\{SKILL_NAME\}\}/$name}"
+      content="${content//\{\{SKILL_DESCRIPTION\}\}/$desc}"
+      content="${content//\{\{SKILL_BODY\}\}/$body}"
+      printf '%s' "$content" > "$aout"
+      say "wrote $aout"
+    else
+      warn "exists, skipping: $aout"
+    fi
+  fi
 }
 
 seed_skill "project-overview" \
@@ -242,6 +314,12 @@ seed_skill "project-overview" \
 seed_skill "run-tests" \
   "Run the project's tests and surface failures." \
   "Invoke \`$PROJECT_BUILD\` (or the equivalent for $PROJECT_LANGUAGE). Report failing test names and the first useful line of each failure."
+
+if [[ "$PROJECT_LINT" != "none" && -n "$PROJECT_LINT" ]]; then
+  seed_skill "lint" \
+    "Run the project's linter and check for style/syntax violations." \
+    "Invoke \`$PROJECT_LINT\`. Report any linting errors or warnings, including file names and line numbers."
+fi
 
 # ---------- git init -------------------------------------------------------
 if [[ ! -d .git ]]; then
@@ -255,6 +333,9 @@ node_modules/
 .venv/
 dist/
 build/
+.antigravity
+.antigravitycli
+.gemini
 EOF
 else
   say "git repo already present — leaving git state alone"
@@ -274,4 +355,4 @@ else
   say "skipping sync (--no-sync)"
 fi
 
-say "done. Next: review AGENTS.md, README.md, agents/, .claude/skills/."
+say "done. Next: review AGENTS.md, README.md, agents/, .claude/skills/, .agents/skills/."

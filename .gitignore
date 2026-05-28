@@ -18,3 +18,11 @@ __pycache__/
 /.github/agents/
 /.goose/recipes/
 /.kiro/steering/
+/.agents/agents/
+/.agents/skills/
+
+# Antigravity CLI
+.antigravity/
+.antigravitycli/
+.gemini/
+
